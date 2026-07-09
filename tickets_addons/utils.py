@@ -1,4 +1,4 @@
-# import qrcode
+import qrcode
 from io import BytesIO
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string

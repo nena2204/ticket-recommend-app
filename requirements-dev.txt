@@ -1,0 +1,10 @@
+Django>=5.2,<5.3
+Pillow>=11.0
+qrcode>=8.0
+pytest>=8.0
+pytest-django>=4.9
+pytest-cov>=6.0
+pytest-playwright>=0.7
+playwright>=1.50
+locust>=2.32
+factory-boy>=3.3
