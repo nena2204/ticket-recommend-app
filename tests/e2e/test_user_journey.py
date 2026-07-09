@@ -1,8 +1,16 @@
+import os
+
 import pytest
 from django.urls import reverse
 
 from tests.conftest import EventFactory, TicketTypeFactory
 
+
+# pytest-playwright can run with an active event loop while pytest-django is
+# preparing the temporary test database. These E2E tests are isolated and run
+# against Django's test database, so allowing Django's sync test setup here is
+# safe for this browser-test module.
+os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 
 # These tests drive a real browser and rendered UI. They complement, rather
 # than duplicate, the faster Django Client integration tests.
