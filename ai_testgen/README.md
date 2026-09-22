@@ -32,30 +32,32 @@ listed in the run report.
 
 ## Running it
 
-Default: **GitHub Models**, free for every GitHub account. Create a fine-grained personal
-access token (GitHub -> Settings -> Developer settings -> Fine-grained tokens) with the
-account permission **Models: Read-only**, then:
+Default provider: any **OpenAI-compatible API**. We use the free tier of **Google Gemini**
+(key from aistudio.google.com):
 
 ```powershell
-$env:GITHUB_TOKEN = "github_pat_..."
-python -m ai_testgen --target events/views_profile.py --iterations 1
-python -m ai_testgen --iterations 5
-python -m ai_testgen --model openai/gpt-4.1 --iterations 5      # stronger model, lower daily limit
+$env:OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+$env:OPENAI_API_KEY = "<Gemini API key>"
+python -m ai_testgen --model gemini-3.8-flash --target events/views_profile.py --iterations 1
+python -m ai_testgen --model gemini-3.8-flash --iterations 5
 ```
 
-The free tier accepts about 8000 input tokens per request, so for this provider the agent
-builds a compact prompt (about 12000 characters): only the uncovered lines with a few
-lines around them, and project files in order of importance until the budget is used.
-Change it with `--prompt-budget`. In GitHub Actions the workflow "AI test generation agent"
-uses the built-in `GITHUB_TOKEN` (permission `models: read`), so no secret is needed.
+Free tiers are often busy. When the server answers 429/500/502/503/504 the agent waits
+(10, 20, 40, 60, 60 seconds) and retries the same request instead of losing the iteration.
 
 Other providers:
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "sk-ant-..."; python -m ai_testgen --provider anthropic
-$env:OPENAI_API_KEY = "sk-..."; python -m ai_testgen --provider openai --model gpt-4.1-mini
-$env:OPENAI_BASE_URL = "http://localhost:11434/v1"; python -m ai_testgen --provider openai --model qwen2.5-coder:14b
+$env:OPENAI_BASE_URL = "http://localhost:11434/v1"; python -m ai_testgen --model qwen2.5-coder:14b   # local Ollama
 ```
+
+For models with a small context window, `--prompt-budget <characters>` builds a compact
+prompt: only the uncovered lines with a few lines around them, and project files in order
+of importance until the budget is used.
+
+The GitHub Actions workflow "AI test generation agent" (started manually) runs the same
+agent with the `OPENAI_API_KEY` / `OPENAI_BASE_URL` repository secrets.
 
 Every run is stored in `ai_testgen/runs/<timestamp>/`: `report.md` (tables for the
 documentation), `report.json`, the raw model answers (`responses/`) and the rejected files.
@@ -73,7 +75,7 @@ python -m ai_testgen --provider replay --replay-dir ai_testgen/runs/<timestamp>/
 | `agent.py` | the observe-plan-act-verify loop and command-line options |
 | `coverage_tools.py` | runs pytest, reads the coverage.py JSON report, annotates source |
 | `prompts.py` | system prompt, context building, code extraction, safety guard |
-| `llm.py` | GitHub Models, Anthropic, OpenAI-compatible and replay providers (standard library only) |
+| `llm.py` | OpenAI-compatible (Gemini, Ollama, ...), Anthropic and replay providers, with retries (standard library only) |
 | `report.py` | Markdown report of a run |
 
 The agent itself is tested in `tests/test_ai_testgen_tools.py`.

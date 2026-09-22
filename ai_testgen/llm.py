@@ -8,10 +8,6 @@ anthropic  Anthropic Messages API (needs ANTHROPIC_API_KEY).
 openai     Any OpenAI-compatible Chat Completions API (needs OPENAI_API_KEY).
            OPENAI_BASE_URL lets you point it at other compatible servers,
            for example a local Ollama server: http://localhost:11434/v1
-github     GitHub Models (free for every GitHub account). Uses GITHUB_TOKEN: a personal
-           access token with the "Models: read" permission, or the built-in token in
-           GitHub Actions. The free tier accepts about 8000 input tokens per request,
-           so the agent automatically sends a compact prompt for this provider.
 replay     Replays responses saved by an earlier run (no network, no cost).
            Useful for reproducible demos and for testing the agent itself.
 """
@@ -19,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -36,25 +33,44 @@ class LLMError(RuntimeError):
     pass
 
 
+RETRY_STATUS = {429, 500, 502, 503, 504}
+RETRY_WAITS = [10, 20, 40, 60, 60]  # seconds; free tiers are often busy for a short while
+
+
 def _post_json(url: str, payload: dict, headers: dict, timeout: int = 180) -> dict:
+    """POST JSON; waits and retries when the server is overloaded or rate limited."""
     data = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=data, method="POST")
-    request.add_header("Content-Type", "application/json")
-    for key, value in headers.items():
-        request.add_header(key, value)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:1000]
-        hint = ""
-        if exc.code == 413 or "tokens_limit" in body:
-            hint = " -> prompt too large for this model; try a smaller --prompt-budget (e.g. 9000)"
-        elif exc.code == 429:
-            hint = " -> rate limit reached; wait a minute (or until tomorrow for the daily limit)"
-        raise LLMError(f"HTTP {exc.code} from {url}: {body}{hint}") from exc
-    except urllib.error.URLError as exc:
-        raise LLMError(f"Cannot reach {url}: {exc.reason}") from exc
+    for attempt in range(len(RETRY_WAITS) + 1):
+        request = urllib.request.Request(url, data=data, method="POST")
+        request.add_header("Content-Type", "application/json")
+        for key, value in headers.items():
+            request.add_header(key, value)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read().decode("utf-8")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                raise LLMError(f"{url} returned a non-JSON answer: {raw[:300]!r}") from None
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")[:1000]
+            if exc.code in RETRY_STATUS and attempt < len(RETRY_WAITS):
+                wait = RETRY_WAITS[attempt]
+                print(f"[ai-testgen]   HTTP {exc.code} (server busy), retrying in {wait}s...", flush=True)
+                time.sleep(wait)
+                continue
+            hint = ""
+            if exc.code == 413 or "tokens_limit" in body:
+                hint = " -> prompt too large for this model; try --prompt-budget 20000"
+            elif exc.code == 429:
+                hint = " -> rate limit reached; wait a few minutes (or until tomorrow for the daily limit)"
+            raise LLMError(f"HTTP {exc.code} from {url}: {body}{hint}") from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt < len(RETRY_WAITS):
+                time.sleep(RETRY_WAITS[attempt])
+                continue
+            raise LLMError(f"Cannot reach {url}: {exc}") from exc
+    raise LLMError(f"No answer from {url}")
 
 
 class AnthropicProvider:
@@ -102,20 +118,6 @@ class OpenAICompatibleProvider:
         return LLMResponse(text, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
 
 
-class GitHubModelsProvider(OpenAICompatibleProvider):
-    name = "github"
-    # ~8000 input tokens per request on the free tier; code is ~3.5 characters per token,
-    # and the repair prompt must still fit the previous answer and the pytest output.
-    prompt_budget = 12000
-
-    def __init__(self, model: str | None):
-        self.base_url = "https://models.github.ai/inference"
-        self.api_key = os.environ.get("GITHUB_TOKEN", "")
-        if not self.api_key:
-            raise LLMError("Set GITHUB_TOKEN (a GitHub token with the 'Models: read' permission).")
-        self.model = model or "openai/gpt-4.1-mini"
-
-
 class ReplayProvider:
     """Returns previously recorded responses (NN.txt files) in order."""
 
@@ -143,8 +145,6 @@ def make_provider(name: str, model: str | None, replay_dir: str | None = None):
         return AnthropicProvider(model)
     if name == "openai":
         return OpenAICompatibleProvider(model)
-    if name == "github":
-        return GitHubModelsProvider(model)
     if name == "replay":
         return ReplayProvider(replay_dir)
     raise LLMError(f"Unknown provider: {name}")

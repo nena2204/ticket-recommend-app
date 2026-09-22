@@ -11,10 +11,9 @@ The agent repeats an observe -> plan -> act -> verify loop:
             really went up. Everything else is thrown away.
 
 Usage examples (from the project root):
-    python -m ai_testgen --iterations 5                       (GitHub Models, free)
+    python -m ai_testgen --model gemini-3.8-flash --iterations 5   (Google Gemini, free tier)
     python -m ai_testgen --provider anthropic --iterations 5
     python -m ai_testgen --target events/views_profile.py --iterations 2
-    python -m ai_testgen --provider openai --model gpt-4.1-mini
     python -m ai_testgen --provider replay --replay-dir ai_testgen/runs/<run>/responses
 """
 from __future__ import annotations
@@ -247,12 +246,12 @@ class Agent:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m ai_testgen", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--provider", choices=["github", "anthropic", "openai", "replay"],
-                        default="github")
-    parser.add_argument("--model", help="model name (defaults: github openai/gpt-4.1-mini, "
-                                         "anthropic claude-sonnet-5)")
+    parser.add_argument("--provider", choices=["openai", "anthropic", "replay"], default="openai",
+                        help="openai = any OpenAI-compatible API (Gemini, OpenAI, Ollama, ...)")
+    parser.add_argument("--model", help="model name, e.g. gemini-3.8-flash "
+                                         "(default for anthropic: claude-sonnet-5)")
     parser.add_argument("--prompt-budget", type=int,
-                        help="maximum prompt size in characters (automatic for github)")
+                        help="maximum prompt size in characters, for models with a small context")
     parser.add_argument("--replay-dir", help="folder with recorded responses for --provider replay")
     parser.add_argument("--iterations", type=int, default=5, help="maximum number of files to generate")
     parser.add_argument("--target", action="append", help="only target this file (repeatable)")

@@ -1,8 +1,10 @@
 name: AI test generation agent
 
 # Started manually (Actions tab -> "AI test generation agent" -> Run workflow).
-# With the default provider "github" it uses GitHub Models through the built-in
-# GITHUB_TOKEN, so no secret is needed. For "anthropic" add the ANTHROPIC_API_KEY secret.
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   provider "openai":    OPENAI_API_KEY and OPENAI_BASE_URL
+#                         (for Google Gemini: https://generativelanguage.googleapis.com/v1beta/openai)
+#   provider "anthropic": ANTHROPIC_API_KEY
 # The generated tests are NOT committed automatically: download the artifact,
 # review the tests, then commit them yourself.
 on:
@@ -11,21 +13,17 @@ on:
       provider:
         description: "LLM provider"
         type: choice
-        options: [github, anthropic]
-        default: github
+        options: [openai, anthropic]
+        default: openai
       model:
-        description: "Model (empty = default of the provider, e.g. openai/gpt-4.1-mini)"
-        default: ""
+        description: "Model, for example gemini-3.8-flash (empty = default for anthropic)"
+        default: "gemini-3.8-flash"
       iterations:
         description: "Maximum number of test files to generate"
         default: "5"
       target:
         description: "Optional file to target, for example events/views_profile.py"
         default: ""
-
-permissions:
-  contents: read
-  models: read   # lets GITHUB_TOKEN call GitHub Models
 
 jobs:
   generate:
@@ -41,7 +39,8 @@ jobs:
       - run: python manage.py migrate --noinput
       - name: Run the agent
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PROVIDER: ${{ inputs.provider }}
           MODEL: ${{ inputs.model }}

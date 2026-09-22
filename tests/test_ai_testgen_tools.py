@@ -61,3 +61,45 @@ def test_prompt_budget_keeps_prompt_small_but_keeps_factories():
     assert len(small) < len(full)
     assert len(small) <= 12000 + 3000  # conftest.py is always included
     assert "tests/conftest.py" in small
+
+
+def test_llm_client_retries_when_server_is_busy(monkeypatch):
+    """A 503 'model overloaded' answer is retried instead of wasting an iteration."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from ai_testgen import llm
+
+    calls = []
+
+    class FakeLLM(BaseHTTPRequestHandler):
+        def do_POST(self):
+            calls.append(self.path)
+            if len(calls) == 1:
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(b'{"error": "high demand"}')
+                return
+            body = json.dumps({"choices": [{"message": {"content": "ok"}}], "usage": {}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), FakeLLM)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(llm, "RETRY_WAITS", [0, 0])
+    monkeypatch.setattr(llm.time, "sleep", lambda seconds: None)
+    monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{server.server_port}/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    try:
+        answer = llm.make_provider("openai", "fake-model").complete("system", [{"role": "user", "content": "hi"}])
+    finally:
+        server.shutdown()
+
+    assert answer.text == "ok"
+    assert calls == ["/v1/chat/completions", "/v1/chat/completions"]
