@@ -75,6 +75,7 @@ def test_llm_client_retries_when_server_is_busy(monkeypatch):
 
     class FakeLLM(BaseHTTPRequestHandler):
         def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
             calls.append(self.path)
             if len(calls) == 1:
                 self.send_response(503)
