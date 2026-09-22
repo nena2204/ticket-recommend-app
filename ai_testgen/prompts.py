@@ -37,19 +37,32 @@ FORBIDDEN_PATTERNS = [
     r"\bos\.remove\b", r"\bunlink\(",
 ]
 
-CONTEXT_FILES = [
-    "tests/conftest.py",
-    "tests/test_cart_flow.py",
-    "TicketRecommend/urls.py",
-    "events/urls.py",
-    "orders/urls.py",
-    "tickets_addons/urls.py",
-    "events/models.py",
-    "orders/models.py",
-    "tickets_addons/models.py",
-    "orders/forms.py",
-    "tickets_addons/forms.py",
-]
+# Context in order of importance. With a prompt budget (small free-tier models) the agent
+# adds files from the top of this list until the budget is used up.
+def _context_files(target: str) -> list[str]:
+    app = target.split("/")[0]
+    ordered = [
+        "tests/conftest.py",
+        "TicketRecommend/urls.py",
+        f"{app}/models.py",
+        f"{app}/urls.py",
+        f"{app}/forms.py",
+        "events/models.py",
+        "orders/models.py",
+        "tickets_addons/models.py",
+        "orders/forms.py",
+        "tickets_addons/forms.py",
+        "events/urls.py",
+        "orders/urls.py",
+        "tickets_addons/urls.py",
+        "tests/test_cart_flow.py",
+    ]
+    unique = []
+    for path in ordered:
+        if path != target and path not in unique and (PROJECT_ROOT / path).exists():
+            unique.append(path)
+    return unique
+
 
 MAX_TEMPLATE_CHARS = 3500
 
@@ -68,32 +81,61 @@ def _templates_used_by(source: str) -> list[str]:
     return found
 
 
-def build_generation_prompt(target: str, missing_lines: list[int], existing_ai_tests: list[str]) -> str:
+def _compact_source(target: str, missing_lines: list[int], context: int = 3) -> str:
+    """Only the imports and the uncovered lines with a few lines around them."""
+    lines = annotated_source(target, missing_lines).splitlines()
+    keep = set(range(min(15, len(lines))))
+    for number in missing_lines:
+        keep.update(range(max(0, number - 1 - context), min(len(lines), number + context)))
+    out, previous = [], -1
+    for index in sorted(keep):
+        if index != previous + 1:
+            out.append("   ....")
+        out.append(lines[index])
+        previous = index
+    return "\n".join(out)
+
+
+def build_generation_prompt(target: str, missing_lines: list[int], existing_ai_tests: list[str],
+                            budget: int | None = None) -> str:
     source = _read(target)
+    annotated = annotated_source(target, missing_lines)
+    if budget and len(annotated) > budget * 0.45:
+        annotated = _compact_source(target, missing_lines)
     parts = [
         f"Write NEW pytest tests that execute the uncovered lines of `{target}`.",
         "Lines marked with `>>` are not executed by the current test suite. Cover as many of "
         "them as you can with meaningful assertions.",
-        f"\n### Target file: {target}\n```\n{annotated_source(target, missing_lines)}\n```",
+        f"\n### Target file: {target}\n```\n{annotated}\n```",
     ]
-    for path in CONTEXT_FILES:
-        if path != target and (PROJECT_ROOT / path).exists():
-            parts.append(f"\n### Context: {path}\n```python\n{_read(path)}\n```")
-    for template in _templates_used_by(source):
-        text = _read(template)[:MAX_TEMPLATE_CHARS]
-        parts.append(f"\n### Template: {template} (may be truncated)\n```html\n{text}\n```")
     if existing_ai_tests:
         listing = "\n".join(f"- {name}" for name in existing_ai_tests)
         parts.append(
             "\nThese AI-generated test files already exist; do not duplicate their tests:\n" + listing
         )
+
+    optional = [(f"Context: {path}", "python", _read(path)) for path in _context_files(target)]
+    optional += [(f"Template: {t} (may be truncated)", "html", _read(t)[:MAX_TEMPLATE_CHARS])
+                 for t in _templates_used_by(source)]
+    used = sum(len(part) for part in parts)
+    skipped = []
+    for index, (title, language, text) in enumerate(optional):
+        block = f"\n### {title}\n```{language}\n{text}\n```"
+        # conftest.py (index 0) is always included: the tests cannot work without factories.
+        if budget and index > 0 and used + len(block) > budget:
+            skipped.append(title.split(": ", 1)[1])
+            continue
+        parts.append(block)
+        used += len(block)
+    if skipped:
+        parts.append("\n(Other project files were left out to save space: " + ", ".join(skipped) + ")")
     return "\n".join(parts)
 
 
-def build_repair_prompt(test_output: str) -> str:
+def build_repair_prompt(test_output: str, max_chars: int = 6000) -> str:
     return (
         "Running your test file failed. Here is the pytest output (truncated):\n"
-        f"```\n{test_output[-6000:]}\n```\n"
+        f"```\n{test_output[-max_chars:]}\n```\n"
         "Fix the TEST, not the application. If the failure proves the application itself is "
         "broken, keep the correct assertion and mark that test xfail(strict=True) with a "
         "'BUG: ...' reason. Reply with the complete corrected file in one ```python block."

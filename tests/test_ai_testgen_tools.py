@@ -48,3 +48,16 @@ def test_candidates_skip_boilerplate_and_sort_by_missing_lines():
         "c/models.py": FileCoverage("c/models.py", 10, []),
     })
     assert [c.path for c in snapshot.candidates()] == ["b/views.py", "a/views.py"]
+
+
+def test_prompt_budget_keeps_prompt_small_but_keeps_factories():
+    """With a budget (GitHub Models free tier) the prompt shrinks but still has conftest.py."""
+    from ai_testgen.prompts import build_generation_prompt
+
+    missing = list(range(1, 400))
+    full = build_generation_prompt("orders/views.py", missing, [], None)
+    small = build_generation_prompt("orders/views.py", [60, 61, 62], [], 12000)
+
+    assert len(small) < len(full)
+    assert len(small) <= 12000 + 3000  # conftest.py is always included
+    assert "tests/conftest.py" in small

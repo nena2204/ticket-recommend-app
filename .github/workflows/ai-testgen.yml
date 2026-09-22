@@ -1,17 +1,31 @@
 name: AI test generation agent
 
 # Started manually (Actions tab -> "AI test generation agent" -> Run workflow).
-# Needs the repository secret ANTHROPIC_API_KEY. The generated tests are NOT committed
-# automatically: download the artifact, review the tests, then commit them yourself.
+# With the default provider "github" it uses GitHub Models through the built-in
+# GITHUB_TOKEN, so no secret is needed. For "anthropic" add the ANTHROPIC_API_KEY secret.
+# The generated tests are NOT committed automatically: download the artifact,
+# review the tests, then commit them yourself.
 on:
   workflow_dispatch:
     inputs:
+      provider:
+        description: "LLM provider"
+        type: choice
+        options: [github, anthropic]
+        default: github
+      model:
+        description: "Model (empty = default of the provider, e.g. openai/gpt-4.1-mini)"
+        default: ""
       iterations:
         description: "Maximum number of test files to generate"
         default: "5"
       target:
         description: "Optional file to target, for example events/views_profile.py"
         default: ""
+
+permissions:
+  contents: read
+  models: read   # lets GITHUB_TOKEN call GitHub Models
 
 jobs:
   generate:
@@ -27,11 +41,15 @@ jobs:
       - run: python manage.py migrate --noinput
       - name: Run the agent
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROVIDER: ${{ inputs.provider }}
+          MODEL: ${{ inputs.model }}
           ITERATIONS: ${{ inputs.iterations }}
           TARGET: ${{ inputs.target }}
         run: |
-          ARGS="--iterations $ITERATIONS"
+          ARGS="--provider $PROVIDER --iterations $ITERATIONS"
+          if [ -n "$MODEL" ]; then ARGS="$ARGS --model $MODEL"; fi
           if [ -n "$TARGET" ]; then ARGS="$ARGS --target $TARGET"; fi
           python -m ai_testgen $ARGS
       - name: Show the report in the job summary
@@ -44,4 +62,3 @@ jobs:
           path: |
             ai_testgen/runs/
             tests/ai_generated/
-

@@ -11,7 +11,8 @@ The agent repeats an observe -> plan -> act -> verify loop:
             really went up. Everything else is thrown away.
 
 Usage examples (from the project root):
-    python -m ai_testgen --iterations 5
+    python -m ai_testgen --iterations 5                       (GitHub Models, free)
+    python -m ai_testgen --provider anthropic --iterations 5
     python -m ai_testgen --target events/views_profile.py --iterations 2
     python -m ai_testgen --provider openai --model gpt-4.1-mini
     python -m ai_testgen --provider replay --replay-dir ai_testgen/runs/<run>/responses
@@ -59,6 +60,7 @@ class Agent:
     def __init__(self, args: argparse.Namespace):
         self.args = args
         self.provider = make_provider(args.provider, args.model, args.replay_dir)
+        self.budget = args.prompt_budget or getattr(self.provider, "prompt_budget", None)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.run_id = stamp
         self.run_dir = RUNS_DIR / stamp
@@ -125,14 +127,17 @@ class Agent:
         test_path = GENERATED_DIR / f"test_ai_{slug}_{self.run_id.replace('-', '_')}_{number}.py"
         iteration.test_file = str(test_path.relative_to(PROJECT_ROOT)).replace("\\", "/")
 
-        messages = [{"role": "user", "content": build_generation_prompt(
-            target, file_cov.missing_lines, self.existing_ai_tests())}]
+        first = {"role": "user", "content": build_generation_prompt(
+            target, file_cov.missing_lines, self.existing_ai_tests(), self.budget)}
+        messages = [first]
+        repair_chars = 2500 if self.budget else 6000
         passed = False
         try:
             for attempt in range(self.args.max_repairs + 1):
                 iteration.attempts = attempt + 1
                 answer = self.ask(messages, iteration)
-                messages.append({"role": "assistant", "content": answer})
+                # Keep the conversation short: the original task, the latest answer, feedback.
+                messages = [first, {"role": "assistant", "content": answer}]
                 code = extract_code(answer)
                 if code is None:
                     feedback = "Your answer had no ```python code block. Send the full test file."
@@ -152,7 +157,8 @@ class Agent:
                     passed = True
                     break
                 self.log(f"  attempt {attempt + 1} failed, asking the model to repair it")
-                messages.append({"role": "user", "content": build_repair_prompt(result.output)})
+                messages.append({"role": "user",
+                                 "content": build_repair_prompt(result.output, repair_chars)})
                 iteration.outcome = "failing"
         except LLMError as exc:
             self.reject(iteration, test_path, "llm-error", str(exc))
@@ -241,8 +247,12 @@ class Agent:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m ai_testgen", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--provider", choices=["anthropic", "openai", "replay"], default="anthropic")
-    parser.add_argument("--model", help="model name (default for anthropic: claude-sonnet-5)")
+    parser.add_argument("--provider", choices=["github", "anthropic", "openai", "replay"],
+                        default="github")
+    parser.add_argument("--model", help="model name (defaults: github openai/gpt-4.1-mini, "
+                                         "anthropic claude-sonnet-5)")
+    parser.add_argument("--prompt-budget", type=int,
+                        help="maximum prompt size in characters (automatic for github)")
     parser.add_argument("--replay-dir", help="folder with recorded responses for --provider replay")
     parser.add_argument("--iterations", type=int, default=5, help="maximum number of files to generate")
     parser.add_argument("--target", action="append", help="only target this file (repeatable)")

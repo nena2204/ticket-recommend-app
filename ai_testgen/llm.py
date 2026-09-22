@@ -8,6 +8,10 @@ anthropic  Anthropic Messages API (needs ANTHROPIC_API_KEY).
 openai     Any OpenAI-compatible Chat Completions API (needs OPENAI_API_KEY).
            OPENAI_BASE_URL lets you point it at other compatible servers,
            for example a local Ollama server: http://localhost:11434/v1
+github     GitHub Models (free for every GitHub account). Uses GITHUB_TOKEN: a personal
+           access token with the "Models: read" permission, or the built-in token in
+           GitHub Actions. The free tier accepts about 8000 input tokens per request,
+           so the agent automatically sends a compact prompt for this provider.
 replay     Replays responses saved by an earlier run (no network, no cost).
            Useful for reproducible demos and for testing the agent itself.
 """
@@ -43,7 +47,12 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 180) -> di
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise LLMError(f"HTTP {exc.code} from {url}: {body}") from exc
+        hint = ""
+        if exc.code == 413 or "tokens_limit" in body:
+            hint = " -> prompt too large for this model; try a smaller --prompt-budget (e.g. 9000)"
+        elif exc.code == 429:
+            hint = " -> rate limit reached; wait a minute (or until tomorrow for the daily limit)"
+        raise LLMError(f"HTTP {exc.code} from {url}: {body}{hint}") from exc
     except urllib.error.URLError as exc:
         raise LLMError(f"Cannot reach {url}: {exc.reason}") from exc
 
@@ -70,6 +79,7 @@ class AnthropicProvider:
 
 class OpenAICompatibleProvider:
     name = "openai"
+    prompt_budget: int | None = None  # characters; None = no limit
 
     def __init__(self, model: str | None):
         self.base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
@@ -90,6 +100,20 @@ class OpenAICompatibleProvider:
         text = result["choices"][0]["message"]["content"] or ""
         usage = result.get("usage", {})
         return LLMResponse(text, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+
+
+class GitHubModelsProvider(OpenAICompatibleProvider):
+    name = "github"
+    # ~8000 input tokens per request on the free tier; code is ~3.5 characters per token,
+    # and the repair prompt must still fit the previous answer and the pytest output.
+    prompt_budget = 12000
+
+    def __init__(self, model: str | None):
+        self.base_url = "https://models.github.ai/inference"
+        self.api_key = os.environ.get("GITHUB_TOKEN", "")
+        if not self.api_key:
+            raise LLMError("Set GITHUB_TOKEN (a GitHub token with the 'Models: read' permission).")
+        self.model = model or "openai/gpt-4.1-mini"
 
 
 class ReplayProvider:
@@ -119,6 +143,8 @@ def make_provider(name: str, model: str | None, replay_dir: str | None = None):
         return AnthropicProvider(model)
     if name == "openai":
         return OpenAICompatibleProvider(model)
+    if name == "github":
+        return GitHubModelsProvider(model)
     if name == "replay":
         return ReplayProvider(replay_dir)
     raise LLMError(f"Unknown provider: {name}")

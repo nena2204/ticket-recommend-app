@@ -32,15 +32,27 @@ listed in the run report.
 
 ## Running it
 
+Default: **GitHub Models**, free for every GitHub account. Create a fine-grained personal
+access token (GitHub -> Settings -> Developer settings -> Fine-grained tokens) with the
+account permission **Models: Read-only**, then:
+
 ```powershell
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
+$env:GITHUB_TOKEN = "github_pat_..."
+python -m ai_testgen --target events/views_profile.py --iterations 1
 python -m ai_testgen --iterations 5
-python -m ai_testgen --target events/views_profile.py --iterations 2
+python -m ai_testgen --model openai/gpt-4.1 --iterations 5      # stronger model, lower daily limit
 ```
 
-Other providers: any OpenAI-compatible API, including a local, free Ollama server.
+The free tier accepts about 8000 input tokens per request, so for this provider the agent
+builds a compact prompt (about 12000 characters): only the uncovered lines with a few
+lines around them, and project files in order of importance until the budget is used.
+Change it with `--prompt-budget`. In GitHub Actions the workflow "AI test generation agent"
+uses the built-in `GITHUB_TOKEN` (permission `models: read`), so no secret is needed.
+
+Other providers:
 
 ```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."; python -m ai_testgen --provider anthropic
 $env:OPENAI_API_KEY = "sk-..."; python -m ai_testgen --provider openai --model gpt-4.1-mini
 $env:OPENAI_BASE_URL = "http://localhost:11434/v1"; python -m ai_testgen --provider openai --model qwen2.5-coder:14b
 ```
@@ -61,7 +73,7 @@ python -m ai_testgen --provider replay --replay-dir ai_testgen/runs/<timestamp>/
 | `agent.py` | the observe-plan-act-verify loop and command-line options |
 | `coverage_tools.py` | runs pytest, reads the coverage.py JSON report, annotates source |
 | `prompts.py` | system prompt, context building, code extraction, safety guard |
-| `llm.py` | Anthropic, OpenAI-compatible and replay providers (standard library only) |
+| `llm.py` | GitHub Models, Anthropic, OpenAI-compatible and replay providers (standard library only) |
 | `report.py` | Markdown report of a run |
 
 The agent itself is tested in `tests/test_ai_testgen_tools.py`.
