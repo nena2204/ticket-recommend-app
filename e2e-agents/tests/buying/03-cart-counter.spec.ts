@@ -19,6 +19,7 @@ test.describe('Buying tickets', () => {
     await expect(page.getByText('E2E Rock Night')).toBeVisible();
     await expect(page.getByText('Regular')).toBeVisible();
     await expect(page.getByText('x1 × 900.00 =')).toBeVisible();
-    await expect(page.getByText('900.00')).toBeVisible();
+        // Reviewer: one item in the cart, so the amount must appear twice (line subtotal and cart total)
+    await expect(page.getByText('900.00', { exact: true })).toHaveCount(2);
   });
 });
