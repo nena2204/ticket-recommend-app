@@ -16,6 +16,7 @@ DEMO_USER = ("e2e_user", "E2e-Pass-2026!")
 EVENTS = [
     # name, category, days from now, popular, [(ticket name, price)]
     ("E2E Rock Night", "concert", 10, True, [("Regular", "900"), ("VIP", "2500")]),
+("E2E Jazz Evening", "concert", 25, False, [("Regular", "700")]),
     ("E2E Summer Festival", "festival", 30, True, [("Day pass", "1500"), ("3-day pass", "3900")]),
     ("E2E Hamlet", "theatre", 5, False, [("Parter", "600")]),
     ("E2E Vardar Derby", "sport", 15, True, [("Tribune North", "300")]),
