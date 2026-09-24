@@ -14,3 +14,4 @@ e2e-agents/playwright-report/
 ai_testgen/runs/*/prompts/
 e2e-agents/.healer-demo-backup/
 debug.log
+e2e-agents/.playwright-mcp/
