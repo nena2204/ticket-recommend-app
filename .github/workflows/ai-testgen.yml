@@ -1,0 +1,63 @@
+name: AI test generation agent
+
+# Started manually (Actions tab -> "AI test generation agent" -> Run workflow).
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   provider "openai":    OPENAI_API_KEY and OPENAI_BASE_URL
+#                         (for Google Gemini: https://generativelanguage.googleapis.com/v1beta/openai)
+#   provider "anthropic": ANTHROPIC_API_KEY
+# The generated tests are NOT committed automatically: download the artifact,
+# review the tests, then commit them yourself.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "LLM provider"
+        type: choice
+        options: [openai, anthropic]
+        default: openai
+      model:
+        description: "Model, for example gemini-3.8-flash (empty = default for anthropic)"
+        default: "gemini-3.8-flash"
+      iterations:
+        description: "Maximum number of test files to generate"
+        default: "5"
+      target:
+        description: "Optional file to target, for example events/views_profile.py"
+        default: ""
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
+      - run: python manage.py migrate --noinput
+      - name: Run the agent
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROVIDER: ${{ inputs.provider }}
+          MODEL: ${{ inputs.model }}
+          ITERATIONS: ${{ inputs.iterations }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          ARGS="--provider $PROVIDER --iterations $ITERATIONS"
+          if [ -n "$MODEL" ]; then ARGS="$ARGS --model $MODEL"; fi
+          if [ -n "$TARGET" ]; then ARGS="$ARGS --target $TARGET"; fi
+          python -m ai_testgen $ARGS
+      - name: Show the report in the job summary
+        if: always()
+        run: cat ai_testgen/runs/*/report.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-testgen-results
+          path: |
+            ai_testgen/runs/
+            tests/ai_generated/

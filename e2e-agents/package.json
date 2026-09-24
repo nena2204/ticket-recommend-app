@@ -1,0 +1,18 @@
+{
+  "name": "ticketo-e2e-agents",
+  "private": true,
+  "description": "Playwright Test Agents (planner, generator, healer) for the Ticketo Django app",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report",
+    "agents:vscode": "playwright init-agents --loop=vscode",
+    "agents:claude": "playwright init-agents --loop=claude",
+    "healer-demo:break": "python healer_demo.py break",
+    "healer-demo:restore": "python healer_demo.py restore"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^22.0.0"
+  }
+}
